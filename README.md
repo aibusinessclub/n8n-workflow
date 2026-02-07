@@ -1,10 +1,18 @@
 # n8n Workflow Recommendation System
 
-A comprehensive system for discovering, recommending, and adapting n8n workflow templates based on user requirements using semantic search and pattern matching.
+A comprehensive system for discovering, recommending, and adapting n8n workflow templates based on user requirements using semantic search and pattern matching. **Now available as an MCP (Model Context Protocol) server deployed on Cloudflare Workers for global, low-latency access by AI agents.**
 
 ## Overview
 
 This system helps users leverage existing n8n workflow templates instead of building workflows from scratch. It provides intelligent recommendations based on use cases, integrations, and workflow patterns, along with detailed guidance on how to adapt templates to specific needs.
+
+### 🚀 MCP Server Deployment
+
+The system is being implemented as an **MCP server on Cloudflare Workers**, enabling:
+- **Global Edge Deployment**: Sub-50ms response times worldwide
+- **AI Agent Access**: Direct integration with Claude, Cursor, and other AI tools
+- **Serverless Scaling**: Automatic scaling without infrastructure management
+- **HTTP/SSE Protocol**: No local installation required, accessible from anywhere
 
 ## Purpose
 
@@ -14,8 +22,21 @@ When building automation workflows, it's more efficient to start with proven tem
 - **Recommends** the best matches based on your requirements
 - **Guides** you through adapting templates to your specific needs
 - **Supports** iterative refinement through follow-up questions
+- **Provides MCP Tools**: AI agents can directly search, recommend, and adapt workflows
 
 ## Documentation Structure
+
+### 🌐 [MCP Server Implementation Plan](plans/mcp-server-implementation-plan.md) **NEW**
+Complete plan for deploying the system as an MCP server on Cloudflare Workers:
+- MCP server architecture and components
+- 6 MCP tools for AI agents (search, recommend, adapt, etc.)
+- 5 MCP resources for data access
+- Cloudflare Workers deployment configuration
+- Semantic search and recommendation algorithms
+- Data storage strategy (KV, D1, R2)
+- Performance optimization and caching
+- Security, testing, and monitoring
+- Client integration examples
 
 ### 📋 [System Architecture](plans/n8n-workflow-recommendation-system.md)
 Complete technical architecture and design of the recommendation system, including:
