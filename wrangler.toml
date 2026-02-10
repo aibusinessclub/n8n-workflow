@@ -1,0 +1,44 @@
+name = "n8n-workflow-mcp"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+[vars]
+ENVIRONMENT = "production"
+AI_MODEL = "@cf/meta/llama-3.1-8b-instruct"
+EMBEDDING_MODEL = "@cf/baai/bge-base-en-v1.5"
+
+# D1 Database Configuration
+[[d1_databases]]
+binding = "DB"
+database_name = "n8n-workflows"
+database_id = "${CLOUDFLARE_D1_DATABASE_ID}"
+preview_database_id = "n8n-workflows-preview"
+
+# KV Namespace for caching and sessions
+[[kv_namespaces]]
+binding = "CACHE"
+id = "${CLOUDFLARE_KV_CACHE_ID}"
+preview_id = "n8n-workflows-cache"
+
+# Cloudflare AI binding
+[[ai]]
+binding = "AI"
+
+# Vectorize index for semantic search
+[vectorize]
+binding = "VECTORIZE"
+index_name = "n8n-workflows"
+
+# Build configuration
+[build]
+command = "npm run build"
+
+# Deployment configuration
+[deploy]
+# Enable incremental deployments for faster builds
+incremental = true
+
+# Logging configuration
+[logs]
+# Enable console logging in production
+level = "info"
