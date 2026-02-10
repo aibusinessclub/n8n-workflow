@@ -1,487 +1,351 @@
 -- ============================================================================
--- N8N Workflow Data Factory - D1 Database Schema
--- ============================================================================
--- Reference schema for Cloudflare D1 database
--- Note: D1 uses SQLite syntax, some PostgreSQL features may not be available
+-- N8N Workflow Data Factory - Database Schema
 -- ============================================================================
 
--- ============================================================================
--- TABLE: workflows (Main)
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS workflows (
-    id TEXT PRIMARY KEY,
-    source TEXT NOT NULL,
-    source_id TEXT,
+-- Workflows Table (Main)
+CREATE TABLE workflows (
+    id VARCHAR(64) PRIMARY KEY,
+    source VARCHAR(50) NOT NULL,
+    source_id VARCHAR(100),
     
     -- Core Data
-    name TEXT NOT NULL,
+    name VARCHAR(500) NOT NULL,
     description TEXT,
-    workflow_json TEXT NOT NULL,
+    workflow_json JSONB NOT NULL,
     
     -- Metadata
     node_count INTEGER,
-    complexity TEXT,
-    category TEXT,
-    tags TEXT,
+    complexity VARCHAR(20),
+    category VARCHAR(100),
+    tags TEXT[],
     
     -- Version Control
     version INTEGER DEFAULT 1,
-    original_created_at TEXT,
-    last_modified_at TEXT,
+    original_created_at TIMESTAMP,
+    last_modified_at TIMESTAMP,
     
     -- Quality Metrics
-    completeness_score REAL DEFAULT 0.0,
-    validity_score REAL DEFAULT 0.0,
-    documentation_score REAL DEFAULT 0.0,
-    popularity_score REAL DEFAULT 0.0,
+    completeness_score DECIMAL(3,2),
+    validity_score DECIMAL(3,2),
+    documentation_score DECIMAL(3,2),
+    popularity_score DECIMAL(3,2),
     
     -- Processing Status
-    processing_status TEXT DEFAULT 'pending',
-    processed_at TEXT,
-    embedding_generated INTEGER DEFAULT 0,
+    processing_status VARCHAR(20) DEFAULT 'pending',
+    processed_at TIMESTAMP,
+    embedding_generated BOOLEAN DEFAULT FALSE,
     
     -- Timestamps
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now')),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     
-    -- Constraints
+    -- Indexes
     CONSTRAINT unique_source_workflow UNIQUE(source, source_id)
 );
 
--- Indexes
-CREATE INDEX IF NOT EXISTS idx_workflows_category ON workflows(category);
-CREATE INDEX IF NOT EXISTS idx_workflows_complexity ON workflows(complexity);
-CREATE INDEX IF NOT EXISTS idx_workflows_status ON workflows(processing_status);
-CREATE INDEX IF NOT EXISTS idx_workflows_created ON workflows(created_at);
+CREATE INDEX idx_workflows_category ON workflows(category);
+CREATE INDEX idx_workflows_complexity ON workflows(complexity);
+CREATE INDEX idx_workflows_status ON workflows(processing_status);
+CREATE INDEX idx_workflows_created ON workflows(created_at);
+CREATE INDEX idx_workflows_tags ON workflows USING GIN(tags);
 
--- ============================================================================
--- TABLE: workflow_nodes (Extracted from workflows)
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS workflow_nodes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    workflow_id TEXT NOT NULL,
+-- Nodes Table (Extracted from workflows)
+CREATE TABLE workflow_nodes (
+    id SERIAL PRIMARY KEY,
+    workflow_id VARCHAR(64) REFERENCES workflows(id) ON DELETE CASCADE,
     
-    node_id TEXT NOT NULL,
-    node_name TEXT,
-    node_type TEXT NOT NULL,
-    node_type_version REAL,
+    node_id VARCHAR(100) NOT NULL,
+    node_name VARCHAR(200),
+    node_type VARCHAR(100) NOT NULL,
+    node_type_version DECIMAL(3,1),
     
     position_x INTEGER,
     position_y INTEGER,
     
-    is_disabled INTEGER DEFAULT 0,
-    is_trigger INTEGER DEFAULT 0,
+    is_disabled BOOLEAN DEFAULT FALSE,
+    is_trigger BOOLEAN DEFAULT FALSE,
     
-    parameters TEXT,
-    credentials TEXT,
+    parameters JSONB,
+    credentials JSONB,  -- Should be empty after cleaning
     
-    created_at TEXT DEFAULT (datetime('now')),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     
-    CONSTRAINT unique_workflow_node UNIQUE(workflow_id, node_id),
-    FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+    CONSTRAINT unique_workflow_node UNIQUE(workflow_id, node_id)
 );
 
--- Indexes
-CREATE INDEX IF NOT EXISTS idx_nodes_workflow ON workflow_nodes(workflow_id);
-CREATE INDEX IF NOT EXISTS idx_nodes_type ON workflow_nodes(node_type);
-CREATE INDEX IF NOT EXISTS idx_nodes_trigger ON workflow_nodes(is_trigger);
+CREATE INDEX idx_nodes_workflow ON workflow_nodes(workflow_id);
+CREATE INDEX idx_nodes_type ON workflow_nodes(node_type);
+CREATE INDEX idx_nodes_trigger ON workflow_nodes(is_trigger);
 
--- ============================================================================
--- TABLE: workflow_connections
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS workflow_connections (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    workflow_id TEXT NOT NULL,
+-- Connections Table
+CREATE TABLE workflow_connections (
+    id SERIAL PRIMARY KEY,
+    workflow_id VARCHAR(64) REFERENCES workflows(id) ON DELETE CASCADE,
     
-    source_node_id TEXT NOT NULL,
+    source_node_id VARCHAR(100) NOT NULL,
     source_output_index INTEGER DEFAULT 0,
     
-    target_node_id TEXT NOT NULL,
+    target_node_id VARCHAR(100) NOT NULL,
     target_input_index INTEGER DEFAULT 0,
     
-    connection_type TEXT DEFAULT 'main',
+    connection_type VARCHAR(50) DEFAULT 'main',
     
-    created_at TEXT DEFAULT (datetime('now')),
-    
-    FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Indexes
-CREATE INDEX IF NOT EXISTS idx_connections_workflow ON workflow_connections(workflow_id);
+CREATE INDEX idx_connections_workflow ON workflow_connections(workflow_id);
 
--- ============================================================================
--- TABLE: categories
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS categories (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT UNIQUE NOT NULL,
+-- Categories Table
+CREATE TABLE categories (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) UNIQUE NOT NULL,
     description TEXT,
     parent_category_id INTEGER REFERENCES categories(id),
     
     workflow_count INTEGER DEFAULT 0,
     
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now'))
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Default categories
-INSERT OR IGNORE INTO categories (name, description, workflow_count) VALUES
-    ('Data Synchronization', 'Workflows for syncing data between systems', 0),
-    ('Marketing Automation', 'Marketing and campaign automation workflows', 0),
-    ('Customer Support', 'Customer service and support workflows', 0),
-    ('Content Management', 'Content creation and management workflows', 0),
-    ('E-commerce Operations', 'E-commerce and sales workflows', 0),
-    ('DevOps & Monitoring', 'DevOps and system monitoring workflows', 0),
-    ('Reporting & Analytics', 'Reporting and analytics workflows', 0),
-    ('Lead Generation & CRM', 'Lead generation and CRM workflows', 0),
-    ('Notification Systems', 'Notification and alerting workflows', 0),
-    ('Document Processing', 'Document handling workflows', 0);
-
--- ============================================================================
--- TABLE: tags
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS tags (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT UNIQUE NOT NULL,
+-- Tags Table
+CREATE TABLE tags (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) UNIQUE NOT NULL,
     
     usage_count INTEGER DEFAULT 0,
     
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- ============================================================================
--- TABLE: workflow_tags (Many-to-Many)
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS workflow_tags (
-    workflow_id TEXT NOT NULL,
-    tag_id INTEGER NOT NULL,
+-- Workflow Tags (Many-to-Many)
+CREATE TABLE workflow_tags (
+    workflow_id VARCHAR(64) REFERENCES workflows(id) ON DELETE CASCADE,
+    tag_id INTEGER REFERENCES tags(id) ON DELETE CASCADE,
     
-    confidence REAL DEFAULT 1.0,
-    is_auto_generated INTEGER DEFAULT 0,
+    confidence DECIMAL(3,2) DEFAULT 1.0,
+    is_auto_generated BOOLEAN DEFAULT FALSE,
     
-    created_at TEXT DEFAULT (datetime('now')),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     
-    PRIMARY KEY (workflow_id, tag_id),
-    FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE,
-    FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+    PRIMARY KEY (workflow_id, tag_id)
 );
 
--- ============================================================================
--- TABLE: node_types_registry
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS node_types (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    type_name TEXT UNIQUE NOT NULL,
-    display_name TEXT,
-    category TEXT,
+-- Node Types Registry
+CREATE TABLE node_types (
+    id SERIAL PRIMARY KEY,
+    type_name VARCHAR(100) UNIQUE NOT NULL,
+    display_name VARCHAR(200),
+    category VARCHAR(100),
     description TEXT,
     
-    is_trigger INTEGER DEFAULT 0,
-    is_deprecated INTEGER DEFAULT 0,
+    is_trigger BOOLEAN DEFAULT FALSE,
+    is_deprecated BOOLEAN DEFAULT FALSE,
     
     usage_count INTEGER DEFAULT 0,
     
     documentation_url TEXT,
     
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now'))
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Common node types
-INSERT OR IGNORE INTO node_types (type_name, display_name, category, is_trigger) VALUES
-    ('webhook', 'Webhook', 'Trigger', 1),
-    ('schedule', 'Schedule', 'Trigger', 1),
-    ('manualTrigger', 'Manual Trigger', 'Trigger', 1),
-    ('errorTrigger', 'Error Trigger', 'Trigger', 1),
-    ('httpRequest', 'HTTP Request', 'HTTP', 0),
-    ('slack', 'Slack', 'Communication', 0),
-    ('googleSheets', 'Google Sheets', 'Spreadsheet', 0),
-    ('airtable', 'Airtable', 'Database', 0),
-    ('notion', 'Notion', 'Database', 0),
-    ('discord', 'Discord', 'Communication', 0),
-    ('email', 'Email', 'Communication', 0),
-    ('telegram', 'Telegram', 'Communication', 0),
-    ('set', 'Set', 'Data', 0),
-    ('function', 'Function', 'Code', 0),
-    ('code', 'Code', 'Code', 0);
-
--- ============================================================================
--- TABLE: integration_services
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS integration_services (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    service_name TEXT UNIQUE NOT NULL,
-    service_type TEXT,
+-- Integration Services (APIs, Platforms used)
+CREATE TABLE integration_services (
+    id SERIAL PRIMARY KEY,
+    service_name VARCHAR(100) UNIQUE NOT NULL,
+    service_type VARCHAR(50),  -- API, Database, Cloud, etc.
     
     usage_count INTEGER DEFAULT 0,
     
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Common integrations
-INSERT OR IGNORE INTO integration_services (service_name, service_type) VALUES
-    ('slack', 'Communication'),
-    ('google-sheets', 'Spreadsheet'),
-    ('airtable', 'Database'),
-    ('notion', 'Database'),
-    ('discord', 'Communication'),
-    ('email', 'Communication'),
-    ('github', 'Development'),
-    ('stripe', 'Payment'),
-    ('hubspot', 'CRM'),
-    ('salesforce', 'CRM'),
-    ('zendesk', 'Support'),
-    ('jira', 'Project Management'),
-    ('twilio', 'Communication'),
-    ('sendgrid', 'Email'),
-    ('mailchimp', 'Email'),
-    ('typeform', 'Form'),
-    ('wordpress', 'CMS');
-
--- ============================================================================
--- TABLE: workflow_services (Many-to-Many)
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS workflow_services (
-    workflow_id TEXT NOT NULL,
-    service_id INTEGER NOT NULL,
+-- Workflow Services (Many-to-Many)
+CREATE TABLE workflow_services (
+    workflow_id VARCHAR(64) REFERENCES workflows(id) ON DELETE CASCADE,
+    service_id INTEGER REFERENCES integration_services(id) ON DELETE CASCADE,
     
-    PRIMARY KEY (workflow_id, service_id),
-    FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE,
-    FOREIGN KEY (service_id) REFERENCES integration_services(id) ON DELETE CASCADE
+    PRIMARY KEY (workflow_id, service_id)
 );
 
--- ============================================================================
--- TABLE: processing_log
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS processing_log (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    workflow_id TEXT NOT NULL,
+-- Processing Log
+CREATE TABLE processing_log (
+    id SERIAL PRIMARY KEY,
+    workflow_id VARCHAR(64) REFERENCES workflows(id) ON DELETE CASCADE,
     
-    stage TEXT NOT NULL,
-    status TEXT NOT NULL,
+    stage VARCHAR(50) NOT NULL,  -- collect, clean, validate, classify, embed
+    status VARCHAR(20) NOT NULL,  -- success, failed, skipped
     
     processing_time_ms INTEGER,
     error_message TEXT,
-    metadata TEXT,
+    metadata JSONB,
     
-    created_at TEXT DEFAULT (datetime('now')),
-    
-    FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Indexes
-CREATE INDEX IF NOT EXISTS idx_processing_workflow ON processing_log(workflow_id);
-CREATE INDEX IF NOT EXISTS idx_processing_stage ON processing_log(stage);
-CREATE INDEX IF NOT EXISTS idx_processing_status ON processing_log(status);
+CREATE INDEX idx_processing_workflow ON processing_log(workflow_id);
+CREATE INDEX idx_processing_stage ON processing_log(stage);
+CREATE INDEX idx_processing_status ON processing_log(status);
 
--- ============================================================================
--- TABLE: quality_metrics
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS quality_metrics (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    workflow_id TEXT NOT NULL,
+-- Quality Metrics History
+CREATE TABLE quality_metrics (
+    id SERIAL PRIMARY KEY,
+    workflow_id VARCHAR(64) REFERENCES workflows(id) ON DELETE CASCADE,
     
-    metric_name TEXT NOT NULL,
-    metric_value REAL,
+    metric_name VARCHAR(50) NOT NULL,
+    metric_value DECIMAL(5,2),
     
-    details TEXT,
+    details JSONB,
     
-    measured_at TEXT DEFAULT (datetime('now')),
-    
-    FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+    measured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Indexes
-CREATE INDEX IF NOT EXISTS idx_quality_workflow ON quality_metrics(workflow_id);
-CREATE INDEX IF NOT EXISTS idx_quality_metric ON quality_metrics(metric_name);
+CREATE INDEX idx_quality_workflow ON quality_metrics(workflow_id);
+CREATE INDEX idx_quality_metric ON quality_metrics(metric_name);
 
--- ============================================================================
--- TABLE: data_sources
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS data_sources (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    source_name TEXT UNIQUE NOT NULL,
-    source_type TEXT,
+-- Data Sources
+CREATE TABLE data_sources (
+    id SERIAL PRIMARY KEY,
+    source_name VARCHAR(50) UNIQUE NOT NULL,
+    source_type VARCHAR(50),  -- community, github, user_submission
     
     base_url TEXT,
-    last_fetched_at TEXT,
+    last_fetched_at TIMESTAMP,
     
     total_workflows_collected INTEGER DEFAULT 0,
-    active INTEGER DEFAULT 1,
+    active BOOLEAN DEFAULT TRUE,
     
-    configuration TEXT,
+    configuration JSONB,
     
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now'))
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Default data sources
-INSERT OR IGNORE INTO data_sources (source_name, source_type, base_url) VALUES
-    ('n8n-community', 'community', 'https://api.n8n.io'),
-    ('github-templates', 'github', 'https://api.github.com'),
-    ('user-submissions', 'user_submission', NULL);
-
--- ============================================================================
--- TABLE: collection_runs
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS collection_runs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+-- Collection Runs
+CREATE TABLE collection_runs (
+    id SERIAL PRIMARY KEY,
     source_id INTEGER REFERENCES data_sources(id),
     
-    run_type TEXT,
-    status TEXT,
+    run_type VARCHAR(20),  -- full, incremental
+    status VARCHAR(20),  -- running, completed, failed
     
     workflows_found INTEGER DEFAULT 0,
     workflows_new INTEGER DEFAULT 0,
     workflows_updated INTEGER DEFAULT 0,
     workflows_failed INTEGER DEFAULT 0,
     
-    started_at TEXT,
-    completed_at TEXT,
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
     
-    error_summary TEXT,
+    error_summary JSONB,
     
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- ============================================================================
--- TABLE: embeddings_metadata
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS embeddings_metadata (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    workflow_id TEXT NOT NULL UNIQUE,
+-- Embeddings Metadata (vector IDs linked to workflows)
+CREATE TABLE embeddings_metadata (
+    id SERIAL PRIMARY KEY,
+    workflow_id VARCHAR(64) REFERENCES workflows(id) ON DELETE CASCADE,
     
-    vector_id TEXT UNIQUE NOT NULL,
-    embedding_model TEXT,
+    vector_id VARCHAR(100) UNIQUE NOT NULL,  -- ID in vector database
+    embedding_model VARCHAR(100),
     embedding_dimension INTEGER,
     
-    text_content TEXT,
+    text_content TEXT,  -- What was embedded
     
-    generated_at TEXT DEFAULT (datetime('now')),
-    
-    FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+    generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Indexes
-CREATE INDEX IF NOT EXISTS idx_embeddings_workflow ON embeddings_metadata(workflow_id);
-CREATE INDEX IF NOT EXISTS idx_embeddings_vector ON embeddings_metadata(vector_id);
+CREATE INDEX idx_embeddings_workflow ON embeddings_metadata(workflow_id);
+CREATE INDEX idx_embeddings_vector ON embeddings_metadata(vector_id);
 
--- ============================================================================
--- TABLE: duplicate_candidates
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS duplicate_candidates (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    workflow_id_1 TEXT NOT NULL,
-    workflow_id_2 TEXT NOT NULL,
+-- Duplicate Detection
+CREATE TABLE duplicate_candidates (
+    id SERIAL PRIMARY KEY,
+    workflow_id_1 VARCHAR(64) REFERENCES workflows(id) ON DELETE CASCADE,
+    workflow_id_2 VARCHAR(64) REFERENCES workflows(id) ON DELETE CASCADE,
     
-    similarity_score REAL,
-    similarity_type TEXT,
+    similarity_score DECIMAL(3,2),
+    similarity_type VARCHAR(50),  -- structural, semantic, exact
     
-    is_duplicate INTEGER,
-    reviewed INTEGER DEFAULT 0,
+    is_duplicate BOOLEAN,
+    reviewed BOOLEAN DEFAULT FALSE,
     
-    detected_at TEXT DEFAULT (datetime('now')),
+    detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     
-    CONSTRAINT unique_pair UNIQUE(workflow_id_1, workflow_id_2),
-    FOREIGN KEY (workflow_id_1) REFERENCES workflows(id) ON DELETE CASCADE,
-    FOREIGN KEY (workflow_id_2) REFERENCES workflows(id) ON DELETE CASCADE
+    CONSTRAINT unique_pair UNIQUE(workflow_id_1, workflow_id_2)
 );
 
--- Indexes
-CREATE INDEX IF NOT EXISTS idx_duplicates_score ON duplicate_candidates(similarity_score DESC);
-CREATE INDEX IF NOT EXISTS idx_duplicates_reviewed ON duplicate_candidates(reviewed);
+CREATE INDEX idx_duplicates_score ON duplicate_candidates(similarity_score DESC);
+CREATE INDEX idx_duplicates_reviewed ON duplicate_candidates(reviewed);
 
 -- ============================================================================
--- SAMPLE DATA
+-- Views for Common Queries
 -- ============================================================================
 
--- Sample workflow
-INSERT OR IGNORE INTO workflows (id, source, source_id, name, description, workflow_json, category, complexity, processing_status) VALUES
-(
-    'wf_sample_001',
-    'community',
-    'n8n_123',
-    'Typeform to Google Sheets Sync',
-    'Sync Typeform responses to Google Sheets with Slack notifications',
-    '{"name": "Typeform to Sheets", "nodes": []}',
-    'Data Synchronization',
-    'intermediate',
-    'completed'
-);
+-- Workflow Summary View
+CREATE VIEW workflow_summary AS
+SELECT 
+    w.id,
+    w.name,
+    w.category,
+    w.complexity,
+    w.node_count,
+    w.tags,
+    w.completeness_score,
+    w.validity_score,
+    w.popularity_score,
+    COUNT(DISTINCT wn.id) as actual_node_count,
+    COUNT(DISTINCT wc.id) as connection_count,
+    ARRAY_AGG(DISTINCT wn.node_type) as node_types_used,
+    w.created_at,
+    w.processed_at
+FROM workflows w
+LEFT JOIN workflow_nodes wn ON w.id = wn.workflow_id
+LEFT JOIN workflow_connections wc ON w.id = wc.workflow_id
+GROUP BY w.id;
 
--- Sample nodes
-INSERT OR IGNORE INTO workflow_nodes (workflow_id, node_id, node_name, node_type, is_trigger) VALUES
-    ('wf_sample_001', 'node_1', 'Typeform Trigger', 'webhook', 1),
-    ('wf_sample_001', 'node_2', 'Google Sheets', 'googleSheets', 0),
-    ('wf_sample_001', 'node_3', 'Slack', 'slack', 0);
+-- Category Statistics View
+CREATE VIEW category_stats AS
+SELECT 
+    c.name as category,
+    COUNT(w.id) as workflow_count,
+    AVG(w.completeness_score) as avg_completeness,
+    AVG(w.validity_score) as avg_validity,
+    AVG(w.node_count) as avg_nodes
+FROM categories c
+LEFT JOIN workflows w ON w.category = c.name
+GROUP BY c.name;
 
--- Sample tags
-INSERT OR IGNORE INTO tags (name, usage_count) VALUES
-    ('slack', 100),
-    ('google-sheets', 80),
-    ('typeform', 50),
-    ('sync', 120),
-    ('notifications', 90);
-
-INSERT OR IGNORE INTO workflow_tags (workflow_id, tag_id, confidence) VALUES
-    ('wf_sample_001', 1, 1.0),
-    ('wf_sample_001', 2, 1.0),
-    ('wf_sample_001', 3, 1.0),
-    ('wf_sample_001', 4, 0.9),
-    ('wf_sample_001', 5, 0.8);
-
--- Sample services
-INSERT OR IGNORE INTO integration_services (service_name, service_type, usage_count) VALUES
-    ('slack', 'Communication', 100),
-    ('google-sheets', 'Spreadsheet', 80),
-    ('typeform', 'Form', 50);
-
-INSERT OR IGNORE INTO workflow_services (workflow_id, service_id) VALUES
-    ('wf_sample_001', 1),
-    ('wf_sample_001', 2),
-    ('wf_sample_001', 3);
-
--- ============================================================================
--- VIEWS (Note: D1 has limited VIEW support)
--- ============================================================================
-
--- Workflow Summary Query
-/*
- CREATE VIEW IF NOT EXISTS workflow_summary AS
- SELECT 
-     w.id,
-     w.name,
-     w.category,
-     w.complexity,
-     w.node_count,
-     w.completeness_score,
-     w.validity_score,
-     w.popularity_score,
-     COUNT(wn.id) as actual_node_count,
-     COUNT(wc.id) as connection_count,
-     w.created_at,
-     w.processed_at
- FROM workflows w
- LEFT JOIN workflow_nodes wn ON w.id = wn.workflow_id
- LEFT JOIN workflow_connections wc ON w.id = wc.workflow_id
- GROUP BY w.id;
- */
+-- Most Used Nodes View
+CREATE VIEW popular_nodes AS
+SELECT 
+    nt.type_name,
+    nt.display_name,
+    nt.category,
+    COUNT(wn.id) as usage_count,
+    COUNT(DISTINCT wn.workflow_id) as workflow_count
+FROM node_types nt
+LEFT JOIN workflow_nodes wn ON nt.type_name = wn.node_type
+GROUP BY nt.id, nt.type_name, nt.display_name, nt.category
+ORDER BY usage_count DESC;
 
 -- ============================================================================
--- END OF SCHEMA
+-- Triggers for Auto-Updates
 -- ============================================================================
+
+-- Update workflow updated_at timestamp
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+CREATE TRIGGER update_workflows_updated_at BEFORE UPDATE ON workflows
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_categories_updated_at BEFORE UPDATE ON categories
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

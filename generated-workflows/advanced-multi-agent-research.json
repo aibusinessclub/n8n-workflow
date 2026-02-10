@@ -1,0 +1,704 @@
+{
+  "name": "Advanced Multi-Agent Technical Research System",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Daily Research Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [50, 50],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "cronExpression": "0 8 * * *"
+            }
+          ]
+        },
+        "timezone": "UTC"
+      }
+    },
+    {
+      "id": "2",
+      "name": "Technical Terms Generator",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [250, 50],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.openAiApi.apiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "@cf/qwen/qwq-32b-preview"
+            },
+            {
+              "name": "messages",
+              "value": "=[{\"role\": \"user\", \"content\": \"Generate 5 trending technical terms for today's research. Focus on AI, blockchain, cloud computing, cybersecurity, and emerging technologies. Return as JSON array with term, category, and priority.\"}]"
+            },
+            {
+              "name": "temperature",
+              "value": "0.7"
+            },
+            {
+              "name": "max_tokens",
+              "value": "1000"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "3",
+      "name": "Parse Research Terms",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 50],
+      "parameters": {
+        "jsCode": "// Parse technical terms and prepare for research\nconst response = $input.first().json;\nconst terms = [];\n\ntry {\n  const content = JSON.parse(response.choices[0].message.content);\n  if (Array.isArray(content)) {\n    content.forEach((term, index) => {\n      terms.push({\n        id: `term_${index + 1}`,\n        term: typeof term === 'string' ? term : term.term || term.name,\n        category: term.category || 'general',\n        priority: term.priority || 'medium',\n        timestamp: new Date().toISOString(),\n        status: 'pending_research'\n      });\n    });\n  }\n} catch (error) {\n  // Fallback parsing\n  const text = response.choices[0].message.content;\n  const matches = text.match(/\"([^\"]+)\"/g) || [];\n  matches.forEach((match, index) => {\n    terms.push({\n      id: `term_${index + 1}`,\n      term: match.replace(/\"/g, ''),\n      category: 'general',\n      priority: 'medium',\n      timestamp: new Date().toISOString(),\n      status: 'pending_research'\n    });\n  });\n}\n\nreturn terms.map(term => ({ json: term }));"
+      }
+    },
+    {
+      "id": "4",
+      "name": "Browser Search Agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [650, 50],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.browserless.io/scrape",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.browserlessApi.apiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "url",
+              "value": "=https://www.google.com/search?q={{ $json.term }}+technical+documentation+tutorial+2024"
+            },
+            {
+              "name": "elements",
+              "value": "=[{\"selector\": \"div.g\", \"attribute\": \"text\"}, {\"selector\": \"a\", \"attribute\": \"href\"}]"
+            },
+            {
+              "name": "waitFor",
+              "value": "3000"
+            },
+            {
+              "name": "viewport",
+              "value": "={\"width\": 1920, \"height\": 1080}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "5",
+      "name": "Content Analysis Agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [850, 50],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.openAiApi.apiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "@cf/qwen/qwq-32b-preview"
+            },
+            {
+              "name": "messages",
+              "value": "=[{\"role\": \"user\", \"content\": \"Analyze and categorize this technical content for the term '{{ $node['Parse Research Terms'].json.term }}'. Content: {{ $json.results }}.\\n\\nProvide detailed analysis:\\n1. Category (AI/Blockchain/Cloud/Security/Other)\\n2. Complexity level (Beginner/Intermediate/Advanced)\\n3. Key insights (5 bullet points)\\n4. Technical questions raised\\n5. Relevance score (1-10)\\n6. Summary paragraph\\n\\nReturn as structured JSON.\"}]"
+            },
+            {
+              "name": "temperature",
+              "value": "0.3"
+            },
+            {
+              "name": "max_tokens",
+              "value": "2000"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "6",
+      "name": "Source Validation Agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1050, 50],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.openAiApi.apiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "@cf/qwen/qwq-32b-preview"
+            },
+            {
+              "name": "messages",
+              "value": "=[{\"role\": \"user\", \"content\": \"Validate the sources and credibility of this research for '{{ $node['Parse Research Terms'].json.term }}'. Analysis: {{ $json.choices[0].message.content }}.\\n\\nPerform comprehensive validation:\\n1. Source credibility assessment (1-10)\\n2. Fact-checking results\\n3. Bias detection\\n4. Information freshness check\\n5. Cross-reference verification\\n6. Source URL validation\\n7. Technical accuracy verification\\n\\nReturn validation report with credibility score and recommendations.\"}]"
+            },
+            {
+              "name": "temperature",
+              "value": "0.2"
+            },
+            {
+              "name": "max_tokens",
+              "value": "1500"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "7",
+      "name": "Orchestration Hub",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [1250, 50],
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll"
+      }
+    },
+    {
+      "id": "8",
+      "name": "Report Generation Agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1450, 50],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.openAiApi.apiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "@cf/qwen/qwq-32b-preview"
+            },
+            {
+              "name": "messages",
+              "value": "=[{\"role\": \"user\", \"content\": \"You are an expert technical research writer. Create a comprehensive research report based on this multi-agent analysis:\\n\\n{{ JSON.stringify($input.all(), null, 2) }}\\n\\nRequirements:\\n1. Professional technical article (2000-2500 words)\\n2. Executive summary\\n3. Technical deep dive\\n4. Practical applications\\n5. Future implications\\n6. Sources cited\\n7. Structured with proper headings\\n8. Include 4 placeholder sections for images: [IMAGE_1], [IMAGE_2], [IMAGE_3], [IMAGE_4]\\n\\nGenerate in markdown format with professional tone.\"}]"
+            },
+            {
+              "name": "temperature",
+              "value": "0.4"
+            },
+            {
+              "name": "max_tokens",
+              "value": "4000"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "9",
+      "name": "Image Generation Agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1450, 250],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/images/generations",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.openAiApi.apiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "prompt",
+              "value": "=Create a professional technical diagram for: {{ $node['Parse Research Terms'].json.term }}. Modern, clean, technical illustration suitable for a research paper. High resolution, detailed, professional color scheme."
+            },
+            {
+              "name": "n",
+              "value": "4"
+            },
+            {
+              "name": "size",
+              "value": "1024x1024"
+            },
+            {
+              "name": "quality",
+              "value": "hd"
+            },
+            {
+              "name": "model",
+              "value": "dall-e-3"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "10",
+      "name": "Content Enhancement Agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1650, 50],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.openAiApi.apiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "@cf/qwen/qwq-32b-preview"
+            },
+            {
+              "name": "messages",
+              "value": "=[{\"role\": \"user\", \"content\": \"Enhance this technical report with images and improved formatting. Report: {{ $json.choices[0].message.content }}.\\n\\nEnhancements needed:\\n1. Replace [IMAGE_1] to [IMAGE_4] with detailed image descriptions\\n2. Add SEO meta description\\n3. Create social media summary\\n4. Add call-to-action section\\n5. Improve markdown formatting\\n6. Add publication metadata\\n\\nReturn enhanced markdown ready for publication.\"}]"
+            },
+            {
+              "name": "temperature",
+              "value": "0.3"
+            },
+            {
+              "name": "max_tokens",
+              "value": "3000"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "11",
+      "name": "Final Assembly",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [1850, 150],
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll"
+      }
+    },
+    {
+      "id": "12",
+      "name": "HTML Email Formatter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2050, 150],
+      "parameters": {
+        "jsCode": "// Create HTML email with embedded images\nconst reportData = $input.all();\nconst reportContent = reportData.find(item => item.json.choices)?.json.choices[0].message.content || '';\nconst imageData = reportData.find(item => item.json.data)?.json.data || [];\n\nconst today = new Date().toLocaleDateString('en-US', { \n  weekday: 'long', \n  year: 'numeric', \n  month: 'long', \n  day: 'numeric' \n});\n\nconst htmlEmail = `\n<!DOCTYPE html>\n<html>\n<head>\n    <meta charset=\"utf-8\">\n    <title>Technical Research Report - ${today}</title>\n    <style>\n        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; line-height: 1.6; color: #333; }\n        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 12px; margin-bottom: 30px; text-align: center; }\n        .header h1 { margin: 0; font-size: 2.5em; font-weight: 300; }\n        .header p { margin: 10px 0 0 0; opacity: 0.9; font-size: 1.1em; }\n        .content { background: #ffffff; padding: 40px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }\n        .image-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 30px 0; }\n        .image-placeholder { background: #f8f9fa; border: 2px dashed #dee2e6; padding: 20px; text-align: center; border-radius: 8px; min-height: 200px; display: flex; align-items: center; justify-content: center; flex-direction: column; }\n        .image-placeholder img { max-width: 100%; border-radius: 6px; margin-bottom: 10px; }\n        .footer { background: #f8f9fa; padding: 30px; border-radius: 12px; text-align: center; color: #6c757d; }\n        h1, h2, h3 { color: #2c3e50; margin-top: 30px; }\n        h1 { border-bottom: 3px solid #667eea; padding-bottom: 10px; }\n        .meta { color: #6c757d; font-size: 0.9em; font-style: italic; }\n        .cta { background: #28a745; color: white; padding: 15px 30px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; }\n        .cta:hover { background: #218838; }\n    </style>\n</head>\n<body>\n    <div class=\"header\">\n        <h1>🔬 Advanced Technical Research Report</h1>\n        <p class=\"meta\">Generated on ${today} | Multi-Agent Research System</p>\n    </div>\n    \n    <div class=\"content\">\n        ${reportContent.replace(/###/g, '<h3>').replace(/##/g, '<h2>').replace(/#/g, '<h1>').replace(/\\*\\*/g, '<strong>').replace(/\\*/g, '<em>').replace(/\\n/g, '<br>')}\n        \n        <div class=\"image-grid\">\n            ${imageData.map((img, index) => `\n                <div class=\"image-placeholder\">\n                    <img src=\"${img.url}\" alt=\"Technical Research Diagram ${index + 1}\" />\n                    <p><strong>Figure ${index + 1}:</strong> Technical visualization for research analysis</p>\n                </div>\n            `).join('')}\n        </div>\n        \n        <div style=\"text-align: center; margin: 30px 0;\">\n            <a href=\"#\" class=\"cta\">📧 Subscribe to Daily Research Reports</a>\n        </div>\n    </div>\n    \n    <div class=\"footer\">\n        <p><strong>About this report:</strong> Generated by advanced multi-agent AI system using headless browsers, content analysis, source validation, and collaborative writing agents.</p>\n        <p class=\"meta\">© 2024 AI Business Club - Advanced Research Automation | Powered by QwQ-32B</p>\n    </div>\n</body>\n</html>\n`;\n\nreturn [{ json: { \n  html: htmlEmail, \n  subject: `🔬 Advanced Technical Research Report - ${today}`,\n  text: reportContent.replace(/<[^>]*>/g, ''), // Strip HTML for text version\n  images: imageData,\n  metadata: {\n    generated_at: new Date().toISOString(),\n    word_count: reportContent.length,\n    image_count: imageData.length,\n    research_terms: reportData.map(item => item.json.term).filter(Boolean)\n  }\n}}];"
+      }
+    },
+    {
+      "id": "13",
+      "name": "Send Email Report",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [2250, 150],
+      "parameters": {
+        "fromEmail": "research@aibusinessclub98.com",
+        "toEmail": "aibusinessclub98@gmail.com",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.html }}",
+        "options": {
+          "attachments": "={{ $json.images.map((img, index) => ({ filename: `research_diagram_${index + 1}.png`, url: img.url })) }}",
+          "priority": "high"
+        }
+      }
+    },
+    {
+      "id": "14",
+      "name": "Research Data Storage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2050, 350],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.airtable.com/v0/{{ $credentials.airtableApi.baseId }}/ResearchReports",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.airtableApi.apiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "records",
+              "value": "=[{\"fields\": {\"Title\": {{ $json.subject }}, \"Content\": {{ $json.text }}, \"HTML_Content\": {{ $json.html }}, \"Research_Date\": {{ new Date().toISOString().split('T')[0] }}, \"Word_Count\": {{ $json.metadata.word_count }}, \"Image_Count\": {{ $json.metadata.image_count }}, \"Research_Terms\": {{ $json.metadata.research_terms.join(', ') }}, \"Generated_By\": \"Multi-Agent Research System\", \"Model_Used\": \"QwQ-32B\"}}}]"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "15",
+      "name": "Error Handler",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [1250, 250],
+      "parameters": {
+        "includeWorkflowExecutionId": true,
+        "includeNodeExecutionId": true
+      }
+    },
+    {
+      "id": "16",
+      "name": "Error Notification",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1450, 350],
+      "parameters": {
+        "fromEmail": "system@aibusinessclub98.com",
+        "toEmail": "aibusinessclub98@gmail.com",
+        "subject": "⚠️ Multi-Agent Research System Error",
+        "message": "The advanced multi-agent research system encountered an error:\n\nError: {{ $json.errorMessage }}\nWorkflow: {{ $json.workflowId }}\nNode: {{ $json.nodeName }}\nTime: {{ $json.timestamp }}\n\nPlease check the system logs and restart the workflow if needed.",
+        "options": {
+          "priority": "high"
+        }
+      }
+    },
+    {
+      "id": "17",
+      "name": "Success Notification",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [2450, 150],
+      "parameters": {
+        "fromEmail": "system@aibusinessclub98.com",
+        "toEmail": "aibusinessclub98@gmail.com",
+        "subject": "✅ Research Report Successfully Generated",
+        "message": "Your advanced technical research report has been successfully generated and sent.\n\nReport Details:\n- Subject: {{ $node['Send Email Report'].json.subject }}\n- Word Count: {{ $node['HTML Email Formatter'].json.metadata.word_count }}\n- Images Generated: {{ $node['HTML Email Formatter'].json.metadata.image_count }}\n- Research Terms: {{ $node['HTML Email Formatter'].json.metadata.research_terms.join(', ') }}\n- Generated At: {{ $node['HTML Email Formatter'].json.metadata.generated_at }}\n\nThe report has been stored in your Airtable database for future reference.",
+        "options": {
+          "priority": "normal"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily Research Trigger": {
+      "main": [
+        [
+          {
+            "node": "Technical Terms Generator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Technical Terms Generator": {
+      "main": [
+        [
+          {
+            "node": "Parse Research Terms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Research Terms": {
+      "main": [
+        [
+          {
+            "node": "Browser Search Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Browser Search Agent": {
+      "main": [
+        [
+          {
+            "node": "Content Analysis Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Content Analysis Agent": {
+      "main": [
+        [
+          {
+            "node": "Source Validation Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Source Validation Agent": {
+      "main": [
+        [
+          {
+            "node": "Orchestration Hub",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Orchestration Hub": {
+      "main": [
+        [
+          {
+            "node": "Report Generation Agent",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Image Generation Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report Generation Agent": {
+      "main": [
+        [
+          {
+            "node": "Content Enhancement Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Content Enhancement Agent": {
+      "main": [
+        [
+          {
+            "node": "Final Assembly",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Image Generation Agent": {
+      "main": [
+        [
+          {
+            "node": "Final Assembly",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final Assembly": {
+      "main": [
+        [
+          {
+            "node": "HTML Email Formatter",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Research Data Storage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTML Email Formatter": {
+      "main": [
+        [
+          {
+            "node": "Send Email Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email Report": {
+      "main": [
+        [
+          {
+            "node": "Success Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Handler": {
+      "main": [
+        [
+          {
+            "node": "Error Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": {
+      "errorNode": "Error Handler"
+    },
+    "saveManualExecutions": true,
+    "callerPolicyDefaultOption": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "advanced-multi-agent-research-v1"
+  },
+  "pinData": {},
+  "versionId": "1.0.0",
+  "triggerCount": 1,
+  "tags": [
+    {
+      "createdAt": "2024-12-10T15:30:00.000Z",
+      "updatedAt": "2024-12-10T15:30:00.000Z",
+      "id": "research-automation",
+      "name": "Research Automation"
+    },
+    {
+      "createdAt": "2024-12-10T15:30:00.000Z",
+      "updatedAt": "2024-12-10T15:30:00.000Z",
+      "id": "multi-agent",
+      "name": "Multi-Agent"
+    },
+    {
+      "createdAt": "2024-12-10T15:30:00.000Z",
+      "updatedAt": "2024-12-10T15:30:00.000Z",
+      "id": "ai-powered",
+      "name": "AI Powered"
+    }
+  ]
+}

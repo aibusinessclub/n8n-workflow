@@ -1,330 +1,160 @@
 /**
- * n8n Workflow Embeddings Generator
+ * Data Factory - Embeddings Generator
  * 
- * Generates vector embeddings for n8n workflow templates.
+ * Generates vector embeddings for workflows using Cloudflare AI
+ * and stores them in Vectorize for semantic search.
  */
 
-import { randomUUID } from 'crypto';
+import type { Env, WorkflowRow } from '../models/types';
+import { log } from '../utils/logger';
+import { generateEmbeddingText } from '../utils/helpers';
 
-// ============================================================================
-// Types
-// ============================================================================
+/**
+ * Generate embedding for a single text using Cloudflare AI
+ */
+async function generateEmbedding(env: Env, text: string): Promise<number[]> {
+  const response = await env.AI.run('@cf/baai/bge-base-en-v1.5', {
+    text: [text],
+  }) as unknown as { data: number[][] };
 
-export interface WorkflowEmbedding {
-  id: string;
-  workflow_id: string;
-  vector: number[];
-  metadata: EmbeddingMetadata;
-  model: string;
-  dimensions: number;
-  created_at: string;
-}
-
-export interface EmbeddingMetadata {
-  name: string;
-  description: string;
-  category: string;
-  complexity: string;
-  tags: string[];
-  integrations: string[];
-  trigger: string;
-  node_count: number;
-  source: string;
-  created_at: string;
-}
-
-export interface EmbeddingOptions {
-  model?: string;
-  batchSize?: number;
-  maxRetries?: number;
-  retryDelay?: number;
-}
-
-export interface EmbeddingResult {
-  success: boolean;
-  embeddings: WorkflowEmbedding[];
-  failed: { workflow_id: string; error: string }[];
-  total_processed: number;
-  total_time_ms: number;
-}
-
-// ============================================================================
-// Embedding Generator Class
-// ============================================================================
-
-export class EmbeddingGenerator {
-  private ai: any;
-  private vectorize: any;
-  private options: Required<EmbeddingOptions>;
-
-  constructor(ai: any, vectorize: any, options: EmbeddingOptions = {}) {
-    this.ai = ai;
-    this.vectorize = vectorize;
-    this.options = {
-      model: options.model || '@cf/baai/bge-base-en-v1.5',
-      batchSize: options.batchSize || 10,
-      maxRetries: options.maxRetries || 3,
-      retryDelay: options.retryDelay || 1000,
-    };
+  if (!response.data || response.data.length === 0) {
+    throw new Error('No embedding returned from AI model');
   }
 
-  async generateEmbedding(workflow: {
-    id: string;
-    name: string;
-    description: string;
-    nodes: any[];
-    structure: any;
-    metadata: any;
-    classification?: { category: string; complexity: string };
-  }): Promise<WorkflowEmbedding> {
-    const text = this.prepareWorkflowText(workflow);
-    const embedding = await this.generateVector(text);
+  return response.data[0] as number[];
+}
 
-    const metadata: EmbeddingMetadata = {
-      name: workflow.name,
-      description: workflow.description,
-      category: workflow.classification?.category || 'Unknown',
-      complexity: workflow.classification?.complexity || 'beginner',
-      tags: workflow.metadata?.tags || [],
-      integrations: workflow.metadata?.integrations || [],
-      trigger: workflow.structure?.trigger_type || 'unknown',
-      node_count: workflow.nodes.length,
-      source: workflow.metadata?.source || 'unknown',
-      created_at: new Date().toISOString(),
-    };
+/**
+ * Generate embeddings for classified workflows and store in Vectorize.
+ * Supports pagination: processes `limit` workflows starting at those with status 'classifying'.
+ * Uses batch AI calls for efficiency (multiple texts per API call).
+ */
+export async function generateAllEmbeddings(
+  env: Env,
+  limit: number = 100
+): Promise<{ embedded: number; failed: number; remaining: number }> {
+  const rows = await env.DB.prepare(
+    "SELECT * FROM workflows WHERE processing_status = 'classifying' LIMIT ?"
+  ).bind(limit).all<WorkflowRow>();
 
-    return {
-      id: `emb_${randomUUID()}`,
-      workflow_id: workflow.id,
-      vector: embedding,
-      metadata,
-      model: this.options.model,
-      dimensions: embedding.length,
-      created_at: new Date().toISOString(),
-    };
-  }
+  // Count remaining
+  const countResult = await env.DB.prepare(
+    "SELECT COUNT(*) as cnt FROM workflows WHERE processing_status = 'classifying'"
+  ).first<{ cnt: number }>();
+  const totalClassifying = countResult?.cnt || 0;
 
-  async generateEmbeddings(workflows: {
-    id: string;
-    name: string;
-    description: string;
-    nodes: any[];
-    structure: any;
-    metadata: any;
-    classification?: { category: string; complexity: string };
-  }[]): Promise<EmbeddingResult> {
-    const startTime = Date.now();
-    const embeddings: WorkflowEmbedding[] = [];
-    const failed: { workflow_id: string; error: string }[] = [];
+  let embedded = 0;
+  let failed = 0;
 
-    for (let i = 0; i < workflows.length; i += this.options.batchSize) {
-      const batch = workflows.slice(i, i + this.options.batchSize);
+  // Process in batches — use batch AI call (multiple texts at once)
+  const batchSize = 20;
+  for (let i = 0; i < rows.results.length; i += batchSize) {
+    const batch = rows.results.slice(i, i + batchSize);
 
-      for (const workflow of batch) {
+    try {
+      // Prepare all texts for batch embedding
+      const textsAndMeta: { row: WorkflowRow; text: string; tags: string[] }[] = [];
+      for (const row of batch) {
+        const tags = row.tags ? JSON.parse(row.tags) as string[] : [];
+        const text = generateEmbeddingText({
+          name: row.name,
+          description: row.description || '',
+          category: row.category || '',
+          tags,
+        });
+        textsAndMeta.push({ row, text, tags });
+      }
+
+      // Single AI call for entire batch
+      const allTexts = textsAndMeta.map(t => t.text);
+      const response = await env.AI.run('@cf/baai/bge-base-en-v1.5', {
+        text: allTexts,
+      }) as unknown as { data: number[][] };
+
+      if (!response.data || response.data.length === 0) {
+        throw new Error('No embeddings returned from AI model');
+      }
+
+      // Build vectors and DB statements
+      const vectors: VectorizeVector[] = [];
+      const metaStmts: D1PreparedStatement[] = [];
+      const statusStmts: D1PreparedStatement[] = [];
+      const logStmts: D1PreparedStatement[] = [];
+
+      for (let j = 0; j < textsAndMeta.length; j++) {
+        const { row, text, tags } = textsAndMeta[j]!;
+        const values = response.data[j];
+        if (!values) continue;
+
+        const vectorId = `wf-${row.id}`;
+        vectors.push({
+          id: vectorId,
+          values,
+          metadata: {
+            workflow_id: row.id,
+            name: row.name,
+            category: row.category || '',
+            complexity: row.complexity || '',
+            tags: tags.join(','),
+          },
+        });
+
+        metaStmts.push(
+          env.DB.prepare(`
+            INSERT OR REPLACE INTO embeddings_metadata
+            (workflow_id, vector_id, embedding_model, embedding_dimension, text_content)
+            VALUES (?, ?, ?, ?, ?)
+          `).bind(row.id, vectorId, '@cf/baai/bge-base-en-v1.5', 768, text)
+        );
+
+        statusStmts.push(
+          env.DB.prepare(`
+            UPDATE workflows SET processing_status = 'embedding',
+            embedding_generated = 1, processed_at = datetime('now'), updated_at = datetime('now')
+            WHERE id = ?
+          `).bind(row.id)
+        );
+
+        logStmts.push(
+          env.DB.prepare(
+            "INSERT INTO processing_log (workflow_id, stage, status, metadata) VALUES (?, 'embed', 'success', ?)"
+          ).bind(row.id, JSON.stringify({ vector_id: vectorId, dimensions: 768 }))
+        );
+
+        embedded++;
+      }
+
+      // Batch DB operations (sub-batch to respect D1 limits)
+      if (metaStmts.length > 0) await env.DB.batch(metaStmts);
+      if (statusStmts.length > 0) await env.DB.batch(statusStmts);
+      if (logStmts.length > 0) await env.DB.batch(logStmts);
+
+      // Batch upsert vectors into Vectorize
+      if (vectors.length > 0) {
+        await env.VECTORIZE.upsert(vectors);
+        log('info', `Upserted ${vectors.length} vectors to Vectorize`);
+      }
+    } catch (error) {
+      // Mark entire batch as failed
+      for (const row of batch) {
+        failed++;
+        const errorMsg = error instanceof Error ? error.message : String(error);
         try {
-          const embedding = await this.generateEmbeddingWithRetry(workflow);
-          embeddings.push(embedding);
-        } catch (error) {
-          failed.push({
-            workflow_id: workflow.id,
-            error: error instanceof Error ? error.message : 'Unknown error',
-          });
-        }
+          await env.DB.prepare(
+            "INSERT INTO processing_log (workflow_id, stage, status, error_message) VALUES (?, 'embed', 'failed', ?)"
+          ).bind(row.id, errorMsg).run();
+        } catch { /* ignore log errors */ }
       }
-    }
-
-    const totalTime = Date.now() - startTime;
-
-    return {
-      success: failed.length === 0,
-      embeddings,
-      failed,
-      total_processed: workflows.length,
-      total_time_ms: totalTime,
-    };
-  }
-
-  async storeEmbeddings(embeddings: WorkflowEmbedding[]): Promise<void> {
-    if (embeddings.length === 0) return;
-
-    const vectors = embeddings.map(emb => ({
-      id: emb.workflow_id,
-      vector: emb.vector,
-      metadata: {
-        ...emb.metadata,
-        embedding_id: emb.id,
-        model: emb.model,
-        dimensions: emb.dimensions,
-      },
-    }));
-
-    await this.vectorize.upsert(vectors);
-  }
-
-  async generateAndStore(workflows: {
-    id: string;
-    name: string;
-    description: string;
-    nodes: any[];
-    structure: any;
-    metadata: any;
-    classification?: { category: string; complexity: string };
-  }[]): Promise<EmbeddingResult> {
-    const result = await this.generateEmbeddings(workflows);
-
-    if (result.embeddings.length > 0) {
-      await this.storeEmbeddings(result.embeddings);
-    }
-
-    return result;
-  }
-
-  private async generateEmbeddingWithRetry(workflow: any): Promise<WorkflowEmbedding> {
-    let lastError: Error | null = null;
-
-    for (let attempt = 1; attempt <= this.options.maxRetries; attempt++) {
-      try {
-        return await this.generateEmbedding(workflow);
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error('Unknown error');
-        console.error(`Attempt ${attempt} failed for workflow ${workflow.id}:`, lastError);
-
-        if (attempt < this.options.maxRetries) {
-          await this.delay(this.options.retryDelay * attempt);
-        }
-      }
-    }
-
-    throw lastError;
-  }
-
-  private async generateVector(text: string): Promise<number[]> {
-    const response = await this.ai.run(this.options.model, { text });
-
-    if (!response || !response.data) {
-      throw new Error('Failed to generate embedding');
-    }
-
-    return response.data;
-  }
-
-  private prepareWorkflowText(workflow: {
-    name: string;
-    description: string;
-    nodes: any[];
-    structure: any;
-    metadata: any;
-    classification?: { category: string };
-  }): string {
-    const parts: string[] = [];
-
-    parts.push(`Workflow: ${workflow.name}`);
-    if (workflow.description) {
-      parts.push(`Description: ${workflow.description}`);
-    }
-
-    if (workflow.classification?.category) {
-      parts.push(`Category: ${workflow.classification.category}`);
-    }
-
-    const integrations = workflow.metadata?.integrations || [];
-    if (integrations.length > 0) {
-      parts.push(`Integrations: ${integrations.join(', ')}`);
-    }
-
-    const triggers = workflow.metadata?.triggers || [];
-    if (triggers.length > 0) {
-      parts.push(`Triggers: ${triggers.join(', ')}`);
-    }
-
-    const nodeTypes = workflow.nodes.map((n: any) => n.type);
-    if (nodeTypes.length > 0) {
-      parts.push(`Nodes: ${nodeTypes.join(', ')}`);
-    }
-
-    const tags = workflow.metadata?.tags || [];
-    if (tags.length > 0) {
-      parts.push(`Tags: ${tags.join(', ')}`);
-    }
-
-    if (workflow.structure) {
-      parts.push(`Trigger Type: ${workflow.structure.trigger_type}`);
-      parts.push(`Complexity: ${workflow.structure.complexity_score}`);
-    }
-
-    parts.push('This n8n workflow handles automation tasks with various integrations and triggers.');
-
-    return parts.join('\n');
-  }
-
-  private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-}
-
-// ============================================================================
-// Search Functions
-// ============================================================================
-
-export interface SearchQuery {
-  text: string;
-  filters?: {
-    category?: string;
-    complexity?: string[];
-    integrations?: string[];
-    trigger?: string;
-  };
-  limit?: number;
-  minScore?: number;
-}
-
-export interface SearchResult {
-  id: string;
-  score: number;
-  metadata: EmbeddingMetadata;
-}
-
-export async function searchSimilarWorkflows(
-  vectorize: any,
-  query: SearchQuery
-): Promise<SearchResult[]> {
-  const filter: Record<string, any> = {};
-
-  if (query.filters) {
-    if (query.filters.category) {
-      filter.category = query.filters.category;
-    }
-    if (query.filters.complexity && query.filters.complexity.length > 0) {
-      filter.complexity = { $in: query.filters.complexity };
-    }
-    if (query.filters.integrations && query.filters.integrations.length > 0) {
-      filter['metadata.integrations'] = { $in: query.filters.integrations };
-    }
-    if (query.filters.trigger) {
-      filter.trigger = query.filters.trigger;
+      log('error', 'Batch embedding failed', { error: error instanceof Error ? error.message : String(error) });
     }
   }
 
-  const results = await vectorize.query(query.text, {
-    limit: query.limit || 10,
-    filter: Object.keys(filter).length > 0 ? filter : undefined,
-    returnMetadata: true,
-  });
+  // Mark all successfully embedded workflows as ready
+  await env.DB.prepare(`
+    UPDATE workflows SET processing_status = 'ready' WHERE processing_status = 'embedding'
+  `).run();
 
-  const minScore = query.minScore || 0;
-  return results.matches
-    .filter((match: any) => match.score >= minScore)
-    .map((match: any) => ({
-      id: match.id,
-      score: match.score,
-      metadata: match.metadata,
-    }));
-}
-
-export function createEmbeddingGenerator(
-  ai: any,
-  vectorize: any,
-  options?: EmbeddingOptions
-): EmbeddingGenerator {
-  return new EmbeddingGenerator(ai, vectorize, options);
+  const remaining = Math.max(0, totalClassifying - embedded);
+  log('info', 'Embedding generation complete', { embedded, failed, remaining });
+  return { embedded, failed, remaining };
 }

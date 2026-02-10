@@ -1,0 +1,159 @@
+{
+  "workflow": {
+    "name": "create a multi-agent research workflow that search (based on Chatbot to Human Escalation)",
+    "nodes": [
+      {
+        "id": "node_0",
+        "name": "Webhook",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 1,
+        "position": [
+          250,
+          300
+        ],
+        "parameters": {},
+        "disabled": false
+      },
+      {
+        "id": "node_1",
+        "name": "AI",
+        "type": "n8n-nodes-base.ai",
+        "typeVersion": 1,
+        "position": [
+          450,
+          300
+        ],
+        "parameters": {},
+        "disabled": false
+      },
+      {
+        "id": "node_2",
+        "name": "IF",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 1,
+        "position": [
+          650,
+          300
+        ],
+        "parameters": {},
+        "disabled": false
+      },
+      {
+        "id": "node_3",
+        "name": "Zendesk",
+        "type": "n8n-nodes-base.zendesk",
+        "typeVersion": 1,
+        "position": [
+          850,
+          300
+        ],
+        "parameters": {},
+        "disabled": false
+      },
+      {
+        "id": "node_4",
+        "name": "Slack",
+        "type": "n8n-nodes-base.slack",
+        "typeVersion": 1,
+        "position": [
+          1050,
+          300
+        ],
+        "parameters": {},
+        "disabled": false
+      },
+      {
+        "id": "node_5",
+        "name": "Database",
+        "type": "n8n-nodes-base.database",
+        "typeVersion": 1,
+        "position": [
+          1250,
+          300
+        ],
+        "parameters": {},
+        "disabled": false
+      }
+    ],
+    "connections": {
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "AI",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "AI": {
+        "main": [
+          [
+            {
+              "node": "IF",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "IF": {
+        "main": [
+          [
+            {
+              "node": "Zendesk",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Zendesk": {
+        "main": [
+          [
+            {
+              "node": "Slack",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Slack": {
+        "main": [
+          [
+            {
+              "node": "Database",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1"
+    },
+    "active": false
+  },
+  "metadata": {
+    "matched_templates": [
+      "support-chatbot-escalation-001",
+      "content-publishing-pipeline-001",
+      "analytics-scheduled-reports-001",
+      "crm-email-tracking-001",
+      "marketing-social-leads-001"
+    ],
+    "confidence_score": 0.435,
+    "generation_strategy": "template_adaptation",
+    "integrations_used": [
+      "Google Search",
+      "Browserless",
+      "OpenAI",
+      "Email",
+      "Image Generation"
+    ],
+    "estimated_complexity": "advanced"
+  }
+}

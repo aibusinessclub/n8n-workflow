@@ -1,280 +1,230 @@
 /**
- * n8n Workflow Classification Engine
+ * Data Factory - Classification Engine
  * 
- * Classifies workflows into categories and assesses complexity.
+ * Classifies workflows into categories and assigns semantic tags.
+ * Uses node composition, trigger types, and integration patterns.
  */
 
-import { randomUUID } from 'crypto';
+import type { Env, WorkflowRow, N8nWorkflow } from '../models/types';
+import { log } from '../utils/logger';
 
-// ============================================================================
-// Types
-// ============================================================================
-
-export interface WorkflowClassification {
-  id: string;
-  workflow_id: string;
-  category: string;
-  subcategory?: string;
-  complexity: 'beginner' | 'intermediate' | 'advanced' | 'expert';
-  confidence: number;
-  classification_criteria: ClassificationCriteria;
-  classified_at: string;
-}
-
-export interface ClassificationCriteria {
-  matched_keywords: string[];
-  matched_nodes: string[];
-  matched_patterns: string[];
-  integration_types: string[];
-  trigger_types: string[];
-  structure_score: number;
-  node_diversity_score: number;
-}
-
-// ============================================================================
-// Category Definitions
-// ============================================================================
-
-const CATEGORIES: Record<string, {
-  keywords: string[];
-  node_patterns: string[];
-  trigger_patterns: string[];
-}> = {
-  'Data Synchronization': {
-    keywords: ['sync', 'synchronization', 'import', 'export', 'transfer', 'migrate', 'backup'],
-    node_patterns: ['googleSheets', 'airtable', 'postgres', 'mysql', 'mongodb', 'redis'],
-    trigger_patterns: ['schedule', 'webhook'],
-  },
-  'Marketing Automation': {
-    keywords: ['marketing', 'campaign', 'email', 'social', 'content', 'advertising', 'promotion'],
-    node_patterns: ['mailchimp', 'sendgrid', 'hubspot', 'slack', 'discord'],
-    trigger_patterns: ['schedule', 'webhook'],
-  },
-  'Customer Support': {
-    keywords: ['support', 'ticket', 'chat', 'helpdesk', 'service', 'response'],
-    node_patterns: ['zendesk', 'slack', 'email', 'telegram', 'discord'],
-    trigger_patterns: ['webhook', 'email'],
-  },
-  'Content Management': {
-    keywords: ['content', 'cms', 'blog', 'article', 'publish', 'wordpress', 'notion'],
-    node_patterns: ['notion', 'httpRequest'],
-    trigger_patterns: ['schedule', 'webhook'],
-  },
-  'E-commerce Operations': {
-    keywords: ['order', 'payment', 'checkout', 'product', 'inventory', 'stripe', 'sales'],
-    node_patterns: ['stripe', 'httpRequest'],
-    trigger_patterns: ['webhook', 'schedule'],
-  },
-  'DevOps & Monitoring': {
-    keywords: ['deploy', 'monitor', 'alert', 'log', 'git', 'github', 'docker', 'error'],
-    node_patterns: ['github', 'httpRequest', 'slack', 'discord'],
-    trigger_patterns: ['schedule', 'webhook', 'error'],
-  },
-  'Reporting & Analytics': {
-    keywords: ['report', 'analytics', 'dashboard', 'metric', 'kpi', 'data', 'visualization'],
-    node_patterns: ['googleSheets', 'httpRequest', 'postgres', 'mysql'],
-    trigger_patterns: ['schedule'],
-  },
-  'Lead Generation & CRM': {
-    keywords: ['lead', 'crm', 'prospect', 'contact', 'pipeline', 'salesforce', 'hubspot', 'conversion'],
-    node_patterns: ['hubspot', 'salesforce', 'airtable', 'googleSheets'],
-    trigger_patterns: ['webhook', 'form'],
-  },
-  'Notification Systems': {
-    keywords: ['notification', 'alert', 'message', 'sms', 'push', 'reminder', 'announcement'],
-    node_patterns: ['slack', 'discord', 'email', 'twilio', 'telegram'],
-    trigger_patterns: ['webhook', 'schedule', 'error'],
-  },
-  'Document Processing': {
-    keywords: ['document', 'pdf', 'ocr', 'extract', 'convert', 'file', 'download'],
-    node_patterns: ['httpRequest', 'dropbox', 'googleDrive'],
-    trigger_patterns: ['webhook', 'schedule'],
-  },
+const CATEGORY_KEYWORDS: Record<string, string[]> = {
+  'Data Synchronization': ['sync', 'transfer', 'backup', 'replicate', 'migrate', 'import', 'export', 'etl'],
+  'Marketing Automation': ['marketing', 'campaign', 'lead', 'newsletter', 'email-marketing', 'drip', 'nurture'],
+  'Customer Support': ['support', 'ticket', 'helpdesk', 'feedback', 'customer-service', 'escalation'],
+  'Content Management': ['content', 'publish', 'cms', 'blog', 'social-media', 'rss', 'post'],
+  'E-commerce Operations': ['order', 'inventory', 'cart', 'product', 'shopify', 'woocommerce', 'payment'],
+  'DevOps & Monitoring': ['deploy', 'monitor', 'incident', 'github', 'ci-cd', 'backup', 'server'],
+  'Reporting & Analytics': ['report', 'analytics', 'dashboard', 'aggregate', 'metric', 'kpi'],
+  'Lead Generation & CRM': ['lead', 'crm', 'prospect', 'pipeline', 'sales', 'scoring', 'qualification'],
+  'Notification Systems': ['notification', 'alert', 'digest', 'routing', 'sms', 'push'],
+  'Document Processing': ['document', 'pdf', 'invoice', 'ocr', 'contract', 'approval', 'template'],
 };
 
-// ============================================================================
-// Complexity Thresholds
-// ============================================================================
-
-const COMPLEXITY_THRESHOLDS = {
-  beginner: { score: 10 },
-  intermediate: { score: 30 },
-  advanced: { score: 60 },
-  expert: { score: 100 },
+const INTEGRATION_TO_SERVICE: Record<string, string> = {
+  'airtable': 'Airtable',
+  'google sheets': 'Google Sheets',
+  'slack': 'Slack',
+  'hubspot': 'HubSpot',
+  'salesforce': 'Salesforce',
+  'typeform': 'Typeform',
+  'mailchimp': 'Mailchimp',
+  'sendgrid': 'SendGrid',
+  'github': 'GitHub',
+  'shopify': 'Shopify',
+  'stripe': 'Stripe',
+  'twilio': 'Twilio',
+  'zendesk': 'Zendesk',
+  'notion': 'Notion',
+  'wordpress': 'WordPress',
+  'linkedin': 'LinkedIn',
+  'twitter': 'Twitter',
+  'facebook': 'Facebook',
+  'postgresql': 'PostgreSQL',
+  'mysql': 'MySQL',
+  'mongodb': 'MongoDB',
+  'aws s3': 'AWS S3',
+  'google drive': 'Google Drive',
+  'dropbox': 'Dropbox',
+  'jira': 'Jira',
+  'trello': 'Trello',
+  'asana': 'Asana',
+  'pagerduty': 'PagerDuty',
+  'grafana': 'Grafana',
+  'quickbooks': 'QuickBooks',
+  'clearbit': 'Clearbit',
 };
 
-// ============================================================================
-// Main Classifier Class
-// ============================================================================
+/**
+ * Classify a workflow into a category based on its metadata
+ */
+function classifyWorkflow(
+  name: string,
+  description: string,
+  tags: string[],
+  nodeTypes: string[]
+): string {
+  const textToSearch = [name, description, ...tags, ...nodeTypes]
+    .join(' ')
+    .toLowerCase();
 
-export class WorkflowClassifier {
-  classify(workflow: {
-    id: string;
-    name: string;
-    description: string;
-    nodes: any[];
-    structure: any;
-    metadata: any;
-  }): WorkflowClassification {
-    const criteria = this.analyzeWorkflow(workflow);
-    const category = this.determineCategory(criteria);
-    const complexity = this.assessComplexity(workflow);
-    const confidence = this.calculateConfidence(criteria, category);
+  let bestCategory = 'Data Synchronization';
+  let bestScore = 0;
 
-    return {
-      id: `clsf_${randomUUID()}`,
-      workflow_id: workflow.id,
-      category,
-      complexity,
-      confidence,
-      classification_criteria: criteria,
-      classified_at: new Date().toISOString(),
-    };
-  }
-
-  async classifyWorkflows(workflows: {
-    id: string;
-    name: string;
-    description: string;
-    nodes: any[];
-    structure: any;
-    metadata: any;
-  }[]): Promise<WorkflowClassification[]> {
-    return workflows.map(workflow => this.classify(workflow));
-  }
-
-  // ============================================================================
-  // Workflow Analysis
-  // ============================================================================
-
-  private analyzeWorkflow(workflow: { name: string; description: string; nodes: any[]; metadata: any; structure?: any }): ClassificationCriteria {
-    const text = `${workflow.name} ${workflow.description}`.toLowerCase();
-    const nodeTypes = workflow.nodes.map((n: any) => n.type?.toLowerCase() || '');
-    const integrations = workflow.metadata?.integrations || [];
-    const triggers = workflow.metadata?.triggers || [];
-
-    const matched_keywords: string[] = [];
-    const matched_nodes: string[] = [];
-    const matched_patterns: string[] = [];
-
-    for (const [category, config] of Object.entries(CATEGORIES)) {
-      for (const keyword of config.keywords) {
-        if (text.includes(keyword.toLowerCase())) matched_keywords.push(keyword);
+  for (const [category, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
+    let score = 0;
+    for (const keyword of keywords) {
+      if (textToSearch.includes(keyword)) {
+        score++;
       }
     }
-
-    for (const nodeType of nodeTypes) {
-      for (const [category, config] of Object.entries(CATEGORIES)) {
-        for (const pattern of config.node_patterns) {
-          if (nodeType.includes(pattern.toLowerCase())) {
-            matched_nodes.push(pattern);
-            matched_patterns.push(category);
-          }
-        }
-      }
+    if (score > bestScore) {
+      bestScore = score;
+      bestCategory = category;
     }
-
-    const structure_score = this.calculateStructureScore({ nodes: workflow.nodes, structure: workflow.structure });
-    const node_diversity_score = this.calculateNodeDiversity(nodeTypes);
-
-    return {
-      matched_keywords: [...new Set(matched_keywords)],
-      matched_nodes: [...new Set(matched_nodes)],
-      matched_patterns: [...new Set(matched_patterns)],
-      integration_types: integrations,
-      trigger_types: triggers,
-      structure_score,
-      node_diversity_score,
-    };
   }
 
-  private determineCategory(criteria: ClassificationCriteria): string {
-    const scores: Record<string, number> = {};
-    for (const category of Object.keys(CATEGORIES)) scores[category] = 0;
-
-    for (const [category, config] of Object.entries(CATEGORIES)) {
-      const categoryKeywords = config.keywords || [];
-      for (const keyword of categoryKeywords) {
-        if (criteria.matched_keywords.includes(keyword)) {
-          scores[category] = (scores[category] || 0) + 2;
-        }
-      }
-    }
-
-    for (const [category, config] of Object.entries(CATEGORIES)) {
-      const categoryPatterns = config.node_patterns || [];
-      for (const pattern of categoryPatterns) {
-        if (criteria.matched_nodes.includes(pattern)) {
-          scores[category] = (scores[category] || 0) + 3;
-        }
-      }
-    }
-
-    let maxScore = 0;
-    let bestCategory = 'Data Synchronization';
-    for (const [category, score] of Object.entries(scores)) {
-      if (score > maxScore) {
-        maxScore = score;
-        bestCategory = category;
-      }
-    }
-    return bestCategory;
-  }
-
-  // ============================================================================
-  // Complexity Assessment
-  // ============================================================================
-
-  private assessComplexity(workflow: { nodes: any[]; metadata: any; structure: any }): 'beginner' | 'intermediate' | 'advanced' | 'expert' {
-    let complexity = workflow.structure?.complexity_score || 0;
-    const uniqueNodeTypes = new Set(workflow.nodes.map((n: any) => n.type)).size;
-    complexity += uniqueNodeTypes * 2;
-    complexity += (workflow.metadata?.integrations?.length || 0) * 3;
-    if (workflow.structure?.has_conditional) complexity += 5;
-    if (workflow.structure?.has_loop) complexity += 10;
-    if (workflow.structure?.has_error_handler) complexity += 3;
-
-    if (complexity < COMPLEXITY_THRESHOLDS.beginner.score) return 'beginner';
-    if (complexity < COMPLEXITY_THRESHOLDS.intermediate.score) return 'intermediate';
-    if (complexity < COMPLEXITY_THRESHOLDS.advanced.score) return 'advanced';
-    return 'expert';
-  }
-
-  private calculateConfidence(criteria: ClassificationCriteria, category: string): number {
-    const categoryConfig = CATEGORIES[category];
-    if (!categoryConfig) return 0.5;
-
-    let confidence = 0.5;
-    const keywordMatchCount = criteria.matched_keywords.filter(k => categoryConfig.keywords.includes(k)).length;
-    confidence += Math.min(keywordMatchCount * 0.1, 0.2);
-    const nodeMatchCount = criteria.matched_nodes.filter(n => categoryConfig.node_patterns.includes(n)).length;
-    confidence += Math.min(nodeMatchCount * 0.15, 0.3);
-    if (keywordMatchCount === 0 && nodeMatchCount === 0) confidence = 0.3;
-
-    return Math.round(confidence * 100) / 100;
-  }
-
-  // ============================================================================
-  // Helper Methods
-  // ============================================================================
-
-  private calculateStructureScore(workflow: { nodes: any[]; structure: any }): number {
-    let score = workflow.nodes.length;
-    const connectionCount = workflow.structure?.connection_count || 0;
-    if (workflow.nodes.length > 0) score += (connectionCount / workflow.nodes.length) * 5;
-    if (workflow.structure?.has_conditional) score += 5;
-    if (workflow.structure?.has_loop) score += 10;
-    if (workflow.structure?.has_error_handler) score += 3;
-    return score;
-  }
-
-  private calculateNodeDiversity(nodeTypes: string[]): number {
-    if (nodeTypes.length === 0) return 0;
-    const uniqueTypes = new Set(nodeTypes);
-    return (uniqueTypes.size / nodeTypes.length) * 100;
-  }
+  return bestCategory;
 }
 
-export function createClassifier(): WorkflowClassifier {
-  return new WorkflowClassifier();
+/**
+ * Generate semantic tags from workflow data
+ */
+function generateTags(
+  name: string,
+  description: string,
+  nodeTypes: string[],
+  existingTags: string[]
+): string[] {
+  const allTags = new Set<string>(existingTags);
+  const text = `${name} ${description}`.toLowerCase();
+
+  // Add integration-based tags
+  for (const [keyword, _service] of Object.entries(INTEGRATION_TO_SERVICE)) {
+    if (text.includes(keyword) || nodeTypes.some(n => n.toLowerCase().includes(keyword))) {
+      allTags.add(keyword.replace(/\s+/g, '-'));
+    }
+  }
+
+  // Add pattern-based tags
+  if (text.includes('schedule') || text.includes('cron')) allTags.add('scheduled');
+  if (text.includes('webhook')) allTags.add('webhook');
+  if (text.includes('trigger')) allTags.add('event-driven');
+  if (text.includes('sync')) allTags.add('synchronization');
+  if (text.includes('automat')) allTags.add('automation');
+  if (text.includes('notif') || text.includes('alert')) allTags.add('notifications');
+  if (text.includes('email')) allTags.add('email');
+  if (text.includes('api')) allTags.add('api-integration');
+  if (text.includes('real-time') || text.includes('realtime')) allTags.add('real-time');
+  if (text.includes('batch')) allTags.add('batch-processing');
+
+  return Array.from(allTags);
+}
+
+/**
+ * Classify all cleaned workflows in the database (batched D1 operations)
+ */
+export async function classifyAllWorkflows(env: Env, limit: number = 500): Promise<{ classified: number; failed: number; remaining: number }> {
+  const rows = await env.DB.prepare(
+    "SELECT * FROM workflows WHERE processing_status = 'cleaning' LIMIT ?"
+  ).bind(limit).all<WorkflowRow>();
+
+  const countResult = await env.DB.prepare(
+    "SELECT COUNT(*) as cnt FROM workflows WHERE processing_status = 'cleaning'"
+  ).first<{ cnt: number }>();
+  const totalPending = countResult?.cnt || 0;
+
+  const updateStmts: D1PreparedStatement[] = [];
+  const logStmts: D1PreparedStatement[] = [];
+  const newTags = new Set<string>();
+  const categoryCounts = new Map<string, number>();
+
+  // Phase 1: Compute classifications in memory
+  interface ClassifiedRow { id: string; category: string; allTags: string[] }
+  const classified: ClassifiedRow[] = [];
+  let failedCount = 0;
+
+  for (const row of rows.results) {
+    try {
+      const workflow = JSON.parse(row.workflow_json) as N8nWorkflow;
+      const existingTags = row.tags ? JSON.parse(row.tags) as string[] : [];
+      const nodeTypes = workflow.nodes.map(n => n.type);
+
+      const category = row.category || classifyWorkflow(row.name, row.description || '', existingTags, nodeTypes);
+      const allTags = generateTags(row.name, row.description || '', nodeTypes, existingTags);
+
+      for (const tag of allTags) newTags.add(tag);
+      categoryCounts.set(category, (categoryCounts.get(category) || 0) + 1);
+
+      updateStmts.push(
+        env.DB.prepare("UPDATE workflows SET category = ?, tags = ?, processing_status = 'classifying', updated_at = datetime('now') WHERE id = ?")
+          .bind(category, JSON.stringify(allTags), row.id)
+      );
+      logStmts.push(
+        env.DB.prepare("INSERT INTO processing_log (workflow_id, stage, status, metadata) VALUES (?, 'classify', 'success', ?)")
+          .bind(row.id, JSON.stringify({ category, tags_count: allTags.length }))
+      );
+      classified.push({ id: row.id, category, allTags });
+    } catch (error) {
+      failedCount++;
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      logStmts.push(
+        env.DB.prepare("INSERT INTO processing_log (workflow_id, stage, status, error_message) VALUES (?, 'classify', 'failed', ?)")
+          .bind(row.id, errorMsg)
+      );
+    }
+  }
+
+  // Phase 2: Batch update workflows (sub-batch for D1 limit)
+  for (let i = 0; i < updateStmts.length; i += 100) {
+    await env.DB.batch(updateStmts.slice(i, i + 100));
+  }
+
+  // Phase 3: Batch insert new tags
+  const tagInsertStmts = Array.from(newTags).map(tag =>
+    env.DB.prepare('INSERT OR IGNORE INTO tags (name) VALUES (?)').bind(tag)
+  );
+  for (let i = 0; i < tagInsertStmts.length; i += 100) {
+    await env.DB.batch(tagInsertStmts.slice(i, i + 100));
+  }
+
+  // Phase 4: Update category counts
+  const catStmts = Array.from(categoryCounts.entries()).map(([cat, count]) =>
+    env.DB.prepare('UPDATE categories SET workflow_count = workflow_count + ? WHERE name = ?').bind(count, cat)
+  );
+  if (catStmts.length > 0) {
+    for (let i = 0; i < catStmts.length; i += 100) {
+      await env.DB.batch(catStmts.slice(i, i + 100));
+    }
+  }
+
+  // Phase 5: Fetch tag IDs and batch insert junction records
+  const tagRows = await env.DB.prepare('SELECT id, name FROM tags').all<{ id: number; name: string }>();
+  const tagMap = new Map(tagRows.results.map(r => [r.name, r.id]));
+
+  const wtStmts: D1PreparedStatement[] = [];
+  for (const cr of classified) {
+    for (const tag of cr.allTags) {
+      const tagId = tagMap.get(tag);
+      if (tagId) {
+        wtStmts.push(
+          env.DB.prepare('INSERT OR IGNORE INTO workflow_tags (workflow_id, tag_id, is_auto_generated) VALUES (?, ?, 1)').bind(cr.id, tagId)
+        );
+      }
+    }
+  }
+  if (wtStmts.length > 0) {
+    for (let i = 0; i < wtStmts.length; i += 50) {
+      await env.DB.batch(wtStmts.slice(i, i + 50));
+    }
+  }
+
+  // Phase 6: Batch insert logs (sub-batched)
+  for (let i = 0; i < logStmts.length; i += 100) {
+    await env.DB.batch(logStmts.slice(i, i + 100));
+  }
+
+  const remaining = Math.max(0, totalPending - classified.length);
+  log('info', 'Classification complete (batched)', { classified: classified.length, failed: failedCount, remaining });
+  return { classified: classified.length, failed: failedCount, remaining };
 }

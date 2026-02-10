@@ -1,44 +1,47 @@
+# Cloudflare Worker Configuration for n8n Workflow MCP Server
+
 name = "n8n-workflow-mcp"
 main = "src/index.ts"
-compatibility_date = "2024-01-01"
+compatibility_date = "2024-11-20"
+compatibility_flags = ["nodejs_compat"]
 
+# Minify for production deployment
+minify = true
+
+# Environment variables
 [vars]
-ENVIRONMENT = "production"
-AI_MODEL = "@cf/meta/llama-3.1-8b-instruct"
-EMBEDDING_MODEL = "@cf/baai/bge-base-en-v1.5"
+ENVIRONMENT = "development"
+LOG_LEVEL = "info"
 
-# D1 Database Configuration
+# D1 Database configuration (for metadata storage)
 [[d1_databases]]
 binding = "DB"
-database_name = "n8n-workflows"
-database_id = "${CLOUDFLARE_D1_DATABASE_ID}"
-preview_database_id = "n8n-workflows-preview"
+database_name = "n8n-workflow-mcp"
+database_id = "b013e5f3-43ce-4558-94a7-790d472f2d66"
 
-# KV Namespace for caching and sessions
+# KV Namespace configuration (for caching and sessions)
 [[kv_namespaces]]
 binding = "CACHE"
-id = "${CLOUDFLARE_KV_CACHE_ID}"
-preview_id = "n8n-workflows-cache"
+id = "983a070e10094affaf1ef65d0dab558c"
 
-# Cloudflare AI binding
-[[ai]]
+# AI binding for embeddings and LLM
+[ai]
 binding = "AI"
 
-# Vectorize index for semantic search
-[vectorize]
+# Vectorize configuration for semantic search
+[[vectorize]]
 binding = "VECTORIZE"
 index_name = "n8n-workflows"
 
-# Build configuration
-[build]
-command = "npm run build"
+# Development configuration
+[env.development]
+vars = { ENVIRONMENT = "development", LOG_LEVEL = "debug" }
 
-# Deployment configuration
-[deploy]
-# Enable incremental deployments for faster builds
-incremental = true
+# Production configuration
+[env.production]
+vars = { ENVIRONMENT = "production", LOG_LEVEL = "info" }
 
-# Logging configuration
-[logs]
-# Enable console logging in production
-level = "info"
+# Routes for custom domains (optional)
+# [[routes]]
+# pattern = "n8n-workflow.example.com"
+# zone_name = "example.com"

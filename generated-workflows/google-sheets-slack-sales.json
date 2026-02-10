@@ -1,0 +1,93 @@
+{
+  "name": "Google Sheet to Slack Sales Notification",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [0, 0],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "hours", "hoursInterval": 1 }]
+        }
+      }
+    },
+    {
+      "id": "2",
+      "name": "Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [220, 0],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "url", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "" }
+      }
+    },
+    {
+      "id": "3",
+      "name": "Filter New Rows",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [440, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "" },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.email }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "isNotEmpty" }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "4",
+      "name": "HTTP Request - Company Lookup",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [660, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.clearbit.com/v2/companies/find?domain={{ $json.email.split('@')[1] }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      }
+    },
+    {
+      "id": "5",
+      "name": "Slack Notification",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [880, 0],
+      "parameters": {
+        "operation": "sendMessage",
+        "channel": { "__rl": true, "mode": "name", "value": "#sales" },
+        "text": "=:bell: *New Lead from Google Sheets*\n\n*Name:* {{ $node['Google Sheets'].json.name }}\n*Email:* {{ $node['Google Sheets'].json.email }}\n*Company:* {{ $json.name || 'Unknown' }}\n*Industry:* {{ $json.category?.industry || 'N/A' }}\n*Employees:* {{ $json.metrics?.employees || 'N/A' }}",
+        "otherOptions": {}
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [[{ "node": "Google Sheets", "type": "main", "index": 0 }]]
+    },
+    "Google Sheets": {
+      "main": [[{ "node": "Filter New Rows", "type": "main", "index": 0 }]]
+    },
+    "Filter New Rows": {
+      "main": [[{ "node": "HTTP Request - Company Lookup", "type": "main", "index": 0 }]]
+    },
+    "HTTP Request - Company Lookup": {
+      "main": [[{ "node": "Slack Notification", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}

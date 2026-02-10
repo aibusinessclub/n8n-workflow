@@ -1,0 +1,638 @@
+{
+  "name": "Advanced create a workflow using different agent browsers that search for technical terms",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Daily Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        50,
+        50
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "cronExpression": "0 8 * * *"
+            }
+          ]
+        },
+        "timezone": "UTC"
+      }
+    },
+    {
+      "id": "2",
+      "name": "Topic Generator Agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        270,
+        50
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "options": {},
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.openAiApi.apiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "gpt-4"
+            },
+            {
+              "name": "messages",
+              "value": "=[{\"role\":\"system\",\"content\":\"You are a research topic expert.\"},{\"role\":\"user\",\"content\":\"Generate 5 trending topics related to: create a workflow using different agent browsers that search for technical terms on the internet usi. Return as JSON array with fields: term, category, priority.\"}]"
+            },
+            {
+              "name": "temperature",
+              "value": "0.7"
+            },
+            {
+              "name": "max_tokens",
+              "value": "1000"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "3",
+      "name": "Parse Topics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        490,
+        50
+      ],
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst items = [];\ntry {\n  const content = response.choices ? response.choices[0].message.content : JSON.stringify(response);\n  const parsed = JSON.parse(content);\n  if (Array.isArray(parsed)) {\n    parsed.forEach((item, i) => {\n      items.push({\n        id: 'topic_' + (i+1),\n        term: typeof item === 'string' ? item : (item.term || item.name || String(item)),\n        category: item.category || 'general',\n        priority: item.priority || 'medium',\n        timestamp: new Date().toISOString()\n      });\n    });\n  }\n} catch(e) {\n  items.push({ id: 'topic_1', term: 'create a workflow using different agent browsers that search', category: 'general', priority: 'high', timestamp: new Date().toISOString() });\n}\nreturn items.map(item => ({ json: item }));"
+      }
+    },
+    {
+      "id": "4",
+      "name": "Browser Search Agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        710,
+        50
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.browserless.io/scrape",
+        "options": {},
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.browserlessApi.apiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "url",
+              "value": "=https://www.google.com/search?q={{ $json.term }}+technical+documentation+2024"
+            },
+            {
+              "name": "elements",
+              "value": "=[{\"selector\":\"body\",\"attribute\":\"text\"}]"
+            },
+            {
+              "name": "waitFor",
+              "value": "3000"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "5",
+      "name": "Content Analysis Agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        930,
+        50
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "options": {},
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.openAiApi.apiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "gpt-4"
+            },
+            {
+              "name": "messages",
+              "value": "=[{\"role\":\"system\",\"content\":\"You are a technical content analyst. Always respond with structured JSON.\"},{\"role\":\"user\",\"content\":\"Analyze and categorize this content. Provide: 1) Category 2) Complexity level 3) Key insights (5 points) 4) Technical questions raised 5) Relevance score 1-10. Content: {{ $json }}\"}]"
+            },
+            {
+              "name": "temperature",
+              "value": "0.3"
+            },
+            {
+              "name": "max_tokens",
+              "value": "2000"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "6",
+      "name": "Source Validation Agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1150,
+        50
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "options": {},
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.openAiApi.apiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "gpt-4"
+            },
+            {
+              "name": "messages",
+              "value": "=[{\"role\":\"system\",\"content\":\"You are a fact-checking and source validation expert. Always respond with structured JSON.\"},{\"role\":\"user\",\"content\":\"Validate credibility of this analysis: {{ $json.choices[0].message.content }}. Check: 1) Source credibility (1-10) 2) Fact-check results 3) Bias detection 4) Freshness 5) Cross-reference verification. Return JSON report.\"}]"
+            },
+            {
+              "name": "temperature",
+              "value": "0.2"
+            },
+            {
+              "name": "max_tokens",
+              "value": "1500"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "7",
+      "name": "Orchestration Hub",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [
+        1370,
+        50
+      ],
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll"
+      }
+    },
+    {
+      "id": "8",
+      "name": "Report Generation Agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1590,
+        50
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "options": {},
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.openAiApi.apiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "gpt-4"
+            },
+            {
+              "name": "messages",
+              "value": "=[{\"role\":\"system\",\"content\":\"You are an expert technical writer. Write comprehensive, professional reports.\"},{\"role\":\"user\",\"content\":\"Write a comprehensive report (2000+ words) based on this research: {{ JSON.stringify($input.all()) }}. Include: 1) Executive summary 2) Technical deep dive 3) Practical applications 4) Future implications 5) Sources cited. Format in markdown. Include 4 image placeholders: [IMAGE_1] through [IMAGE_4].\"}]"
+            },
+            {
+              "name": "temperature",
+              "value": "0.4"
+            },
+            {
+              "name": "max_tokens",
+              "value": "4000"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "9",
+      "name": "Content Enhancement Agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1810,
+        50
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "options": {},
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.openAiApi.apiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "gpt-4"
+            },
+            {
+              "name": "messages",
+              "value": "=[{\"role\":\"system\",\"content\":\"You are a content enhancement specialist.\"},{\"role\":\"user\",\"content\":\"Enhance this report: {{ $json.choices[0].message.content }}. Add: 1) SEO meta description 2) Social media summary 3) Call-to-action 4) Improved formatting. Return enhanced markdown.\"}]"
+            },
+            {
+              "name": "temperature",
+              "value": "0.3"
+            },
+            {
+              "name": "max_tokens",
+              "value": "3000"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "10",
+      "name": "Image Generation Agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2030,
+        250
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/images/generations",
+        "options": {},
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.openAiApi.apiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "dall-e-3"
+            },
+            {
+              "name": "prompt",
+              "value": "=Create a professional technical diagram for: {{ $json.term || $json.choices[0].message.content.substring(0,100) }}. Modern, clean, professional illustration."
+            },
+            {
+              "name": "n",
+              "value": "4"
+            },
+            {
+              "name": "size",
+              "value": "1024x1024"
+            },
+            {
+              "name": "quality",
+              "value": "hd"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "11",
+      "name": "Final Assembly",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [
+        2250,
+        50
+      ],
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll"
+      }
+    },
+    {
+      "id": "12",
+      "name": "HTML Email Formatter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2470,
+        50
+      ],
+      "parameters": {
+        "jsCode": "const data = $input.all();\nconst report = data.find(i => i.json.choices)?.json.choices[0].message.content || '';\nconst images = data.find(i => i.json.data)?.json.data || [];\nconst today = new Date().toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' });\nconst html = '<html><head><style>body{font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:20px}.header{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;padding:30px;border-radius:12px;text-align:center}.content{padding:20px;line-height:1.6}.img-grid{display:grid;grid-template-columns:1fr 1fr;gap:15px;margin:20px 0}.footer{background:#f8f9fa;padding:20px;border-radius:8px;text-align:center;color:#6c757d}</style></head><body><div class=\"header\"><h1>Technical Research Report</h1><p>' + today + '</p></div><div class=\"content\">' + report.replace(/\\n/g,'<br>') + '<div class=\"img-grid\">' + images.map((img,i) => '<div><img src=\"' + img.url + '\" style=\"width:100%;border-radius:8px\"><p>Figure ' + (i+1) + '</p></div>').join('') + '</div></div><div class=\"footer\"><p>Generated by Multi-Agent Research System</p></div></body></html>';\nreturn [{ json: { html, subject: 'Technical Research Report - ' + today, text: report, images } }];"
+      }
+    },
+    {
+      "id": "13",
+      "name": "Send Email Report",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        2690,
+        50
+      ],
+      "parameters": {
+        "fromEmail": "system@aibusinessclub.com",
+        "toEmail": "aibusinessclub98@gmail.com",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.html }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "14",
+      "name": "Error Handler",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        2910,
+        350
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "15",
+      "name": "Error Notification",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        3130,
+        350
+      ],
+      "parameters": {
+        "fromEmail": "system@aibusinessclub.com",
+        "toEmail": "aibusinessclub98@gmail.com",
+        "subject": "=Workflow Error Alert",
+        "emailType": "text",
+        "message": "=Error in workflow: {{ $json.errorMessage }}\nNode: {{ $json.nodeName }}\nTime: {{ $json.timestamp }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Daily Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Topic Generator Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Topic Generator Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse Topics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Topics": {
+      "main": [
+        [
+          {
+            "node": "Browser Search Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Browser Search Agent": {
+      "main": [
+        [
+          {
+            "node": "Content Analysis Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Content Analysis Agent": {
+      "main": [
+        [
+          {
+            "node": "Source Validation Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Source Validation Agent": {
+      "main": [
+        [
+          {
+            "node": "Orchestration Hub",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Orchestration Hub": {
+      "main": [
+        [
+          {
+            "node": "Report Generation Agent",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Image Generation Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report Generation Agent": {
+      "main": [
+        [
+          {
+            "node": "Content Enhancement Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Content Enhancement Agent": {
+      "main": [
+        [
+          {
+            "node": "Final Assembly",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Image Generation Agent": {
+      "main": [
+        [
+          {
+            "node": "Final Assembly",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final Assembly": {
+      "main": [
+        [
+          {
+            "node": "HTML Email Formatter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTML Email Formatter": {
+      "main": [
+        [
+          {
+            "node": "Send Email Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Handler": {
+      "main": [
+        [
+          {
+            "node": "Error Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}
